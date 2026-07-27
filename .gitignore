@@ -1,0 +1,18 @@
+# ccwebsite/, weekly_report/, server_info/ are git submodules (see
+# .gitmodules) — their contents are tracked via that mechanism, not as
+# regular files here, so they're deliberately not listed below.
+
+# Vendored/downloaded build tooling — not our source, easy to re-fetch.
+/build-src/
+/nginx-1.31.2/
+
+# Third-party services' own runtime state: config secrets, SQLite
+# databases, recordings, member directory data. Never belongs in git —
+# see deploy-bundle/ for the scripts that regenerate/deploy this stuff
+# from scratch on a real server.
+/authelia/
+/galene/
+/lldap/
+
+# Local logs from running things by hand during development.
+/run-logs/

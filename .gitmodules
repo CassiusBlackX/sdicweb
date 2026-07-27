@@ -1,0 +1,9 @@
+[submodule "ccwebsite"]
+	path = ccwebsite
+	url = https://sdic.sjtu.edu.cn/git/ccwebsite.git
+[submodule "weekly_report"]
+	path = weekly_report
+	url = git@github.com:CassiusBlackX/weekly_report.git
+[submodule "server_info"]
+	path = server_info
+	url = git@github.com:CassiusBlackX/server_info.git

@@ -1,0 +1,10 @@
+# Rebuilds the galene-sdic image with two static-file overlays on top of
+# the upstream build (galene-sdic.tar.gz, loaded as localhost/galene-sdic):
+#   - galene.html: adds a <script> tag loading sso-logout-hook.js
+#   - sso-logout-hook.js: makes the room's own "Logout" button also end
+#     the real Authelia session (see the file for why that's needed)
+# Re-run this whenever galene-sdic.tar.gz is rebuilt/updated upstream —
+# `podman build` here after re-loading the new base image picks it up.
+FROM localhost/galene-sdic:latest
+COPY galene.html /galene/static/galene.html
+COPY sso-logout-hook.js /galene/static/sso-logout-hook.js

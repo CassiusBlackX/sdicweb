@@ -1,0 +1,9 @@
+# Generated at deploy time — never commit secrets or runtime state.
+secrets.env
+rendered/
+data/
+
+# Saved image tarballs (transfer artifacts, rebuilt from each service's
+# own repo + `podman save`; too large for git anyway).
+images/*.tar
+images/*.tar.gz

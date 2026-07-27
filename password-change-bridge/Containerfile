@@ -1,0 +1,16 @@
+FROM docker.io/lldap/lldap:stable AS lldapbin
+
+FROM node:20-alpine
+RUN apk add --no-cache tini
+WORKDIR /app
+ENV PORT=8095
+COPY --from=lldapbin /app/lldap_set_password /usr/local/bin/lldap_set_password
+COPY server.js ./
+
+RUN addgroup -S appgroup \
+    && adduser -S appuser -G appgroup
+USER appuser
+EXPOSE 8095
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "server.js"]
