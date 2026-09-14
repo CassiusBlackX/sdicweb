@@ -7,6 +7,24 @@
 全部以 podman 镜像交付；member（实验室成员）只需要一套 lldap 账号密码即可登录三个应用；
 管理员在 lldap 网页里增删成员即可，不用碰任何一个服务本身。
 
+## 管理员常见操作速查
+
+| 要做什么 | 在哪看 |
+| --- | --- |
+| 新生入学 / 毕业，增删成员账号 | 本文「日常管理成员」一节 |
+| 成员忘记密码 / 自助改密码 | 本文「日常管理成员」一节（`/account/`） |
+| 管理员自己的密码 | lldap 管理后台（SSH 隧道），本文「日常管理成员」一节 |
+| 换 server_info 的 SMTP 发信邮箱 / 收信邮箱 | 本文「编辑通知邮件（server_info）」一节 |
+| 修改实验室官网内容（学生/教师信息、新闻、论文） | `../ccwebsite/README.md` |
+| 推送官网改动到线上 | `../ccwebsite/README.md`「推送到生产」 |
+| weekly_report 用户管理（停用/删除/改角色/重置密码） | `../weekly_report/README.md`「管理员操作」 |
+| weekly_report 定时开启本周填报 | `../weekly_report/README.md`「管理员操作」 |
+| 新增 / 修改 galene 会议室 | 本文「galene 会议室」一节 |
+| 轮换 galene 会议室的 JWT 密钥 | `../galene-auth-bridge/README.md` |
+| galene 升级后重新打 SSO 补丁 | `../galene-patch/README.md` |
+| 备份 / 灾难恢复需要留哪些文件 | 本文「备份 / 灾难恢复」一节 |
+| 重启某个服务 / 看日志 | 本文「重启单个服务」一节 |
+
 ## 目录结构
 
 ```
@@ -119,22 +137,84 @@ ssh -L 8091:127.0.0.1:17170 youruser@your-nginx-server
   实际发信要用的 SMTP 账号。这组不填的话，`server_info` 只会在日志里打一行警告，不会真的
   发邮件（不影响正常使用，只是不通知）。
 
-改法：**不要直接手改 `rendered/server_info.env`**（下次重新跑 01 会被覆盖），而是在跑
-`01-render-configs.sh` 时带上对应变量，例如：
+### 只改这一项配置（推荐，日常场景）
+
+已经部署好、只是想换一个 SMTP 账号或收件邮箱：**直接改 `~/sdicweb-deploy/rendered/server_info.env`
+这一个文件，再重启这一个容器就行**，不要重新跑整个 `01-render-configs.sh`（原因见下面的踩坑记录）：
 
 ```bash
-ADMIN_USERNAME=你的真实用户名 \
-SERVER_INFO_ADMIN_EMAIL=lab-notify@sjtu.edu.cn \
-SERVER_INFO_SMTP_HOST=smtp.exmail.qq.com \
-SERVER_INFO_SMTP_PORT=465 \
-SERVER_INFO_SMTP_USER=lab-notify@sjtu.edu.cn \
-SERVER_INFO_SMTP_PASS=你的SMTP密码或授权码 \
-./scripts/01-render-configs.sh
+cd ~/sdicweb-deploy
+vim rendered/server_info.env   # 改 ADMIN_EMAIL / SMTP_HOST / SMTP_PORT / SMTP_SECURE / SMTP_USER / SMTP_PASS / SMTP_FROM
+chmod 600 rendered/server_info.env
+
+podman rm -f server-info
+podman run -d --name server-info \
+  --restart unless-stopped \
+  --network sdicnet \
+  -p 127.0.0.1:3000:3000 \
+  --env-file rendered/server_info.env \
+  -v server_info_data:/app/data:Z \
+  localhost/server-info:latest
 ```
 
-然后 `podman restart server-info` 让新配置生效。已经部署过、只是想补填这几个变量的话，同样
-重新跑一遍 01（会重新生成整个 `rendered/` 目录，其他服务的配置不受影响）再重启 server-info
-即可，不需要重新走 02～05。
+改完建议实际发一封测试邮件验证（比直接等真实编辑触发靠谱）：
+
+```bash
+podman exec server-info node -e "
+require('/app/src/mailer').notifyDocumentEdited({
+  editor: { display_name: '测试', username: 'test' },
+  diff: 'test diff',
+  editedAt: new Date().toISOString(),
+}).then(r => console.log(r));
+"
+```
+看到 `{ sent: true }` 就是成功了；`sent: false` 的话 `reason` 字段会说明原因（`no-admin-email` /
+`no-smtp` / `send-error`，后者会带 `error.message`，常见的是密码错、或者 SMTP 服务商需要"授权码"
+而不是登录密码）。
+
+改完别忘了同步更新 `secrets.env` 里对应的几行（见下一节），不然下次做灾难恢复、从零全量渲染时，
+这次改的值会丢。
+
+### 全量重新渲染（`01-render-configs.sh`，仅用于首次部署 / 灾难恢复）
+
+`01-render-configs.sh` 会读 `secrets.env`（`source secrets.env`）里的
+`SERVER_INFO_ADMIN_EMAIL` / `SERVER_INFO_SMTP_*`，所以只要这几个值已经写进了 `secrets.env`
+（见下一节），直接：
+
+```bash
+ADMIN_USERNAME=你的真实用户名 ./scripts/01-render-configs.sh
+podman restart server-info
+```
+
+就会带上正确的 SMTP 配置，不需要每次在命令行上重新敲一遍那一长串变量。
+
+> **踩坑记录**：`01-render-configs.sh` 是"全量重新渲染"——它会**无条件重新生成**
+> `rendered/weekly_report.env` 里的 `ADMIN_PASSWORD`（`openssl rand` 现场生成的随机值，不是从
+> `secrets.env` 读的），也会重写 nginx / Authelia / galene 的配置文件。生产环境下 `weekly_report`
+> 的真实管理员登录早就切到 SSO 了（见 `../weekly_report/README.md`），这个字段基本是废弃的初始
+> 引导密码，所以实际影响不大；但如果你的部署还没切 SSO、还在用这个密码登录，全量重新渲染会在你
+> 没注意到的情况下把它换掉。这就是为什么上面"只改这一项"的直接编辑法是日常场景下更安全的选择——
+> 全量渲染只在第一次部署或者需要从 `secrets.env` 灾难恢复整套配置时才用。
+
+### 让这几个值在灾难恢复时也不丢：写进 `secrets.env`
+
+`secrets.env` 本来只存"随机生成的密钥"，SMTP 账号是外部提供的、不是生成的，所以
+`00-generate-secrets.sh` 不会自动写这几行。想让它们在全量重新渲染时也生效，手动追加到
+`secrets.env` 末尾（该文件已经是 `chmod 600`，只有部署账号自己能读）：
+
+```bash
+cat >> ~/sdicweb-deploy/secrets.env <<'EOF'
+
+# 非随机生成，是外部提供的真实 SMTP 账号，手动记录以便灾难恢复时全量渲染不丢失。
+SERVER_INFO_ADMIN_EMAIL=cassiusx@qq.com
+SERVER_INFO_SMTP_HOST=mail.hust.edu.cn
+SERVER_INFO_SMTP_PORT=465
+SERVER_INFO_SMTP_SECURE=true
+SERVER_INFO_SMTP_USER=u202215479@hust.edu.cn
+SERVER_INFO_SMTP_PASS=你的SMTP密码或授权码
+SERVER_INFO_SMTP_FROM=u202215479@hust.edu.cn
+EOF
+```
 
 ## galene 会议室
 
